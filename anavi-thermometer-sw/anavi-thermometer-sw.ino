@@ -116,6 +116,8 @@ char line2_topic[11 + sizeof(machineId)];
 char line3_topic[11 + sizeof(machineId)];
 char cmnd_temp_coefficient_topic[14 + sizeof(machineId)];
 char cmnd_ds_temp_coefficient_topic[20 + sizeof(machineId)];
+char cmnd_trigger_restart_topic[13 + sizeof(machineId)];
+char cmnd_trigger_reset_topic[11 + sizeof(machineId)];
 
 // The display can fit 26 "i":s on a single line.  It will fit even
 // less of other characters.
@@ -284,6 +286,8 @@ void setup()
     sprintf(cmnd_ds_temp_coefficient_topic, "cmnd/%s/water/tempcoef", machineId);
     sprintf(stat_ds_temp_coefficient_topic, "stat/%s/water/tempcoef", machineId);
     sprintf(cmnd_update_topic, "cmnd/%s/update", machineId);
+    sprintf(cmnd_trigger_restart_topic, "cmnd/%s/restart", machineId);
+    sprintf(cmnd_trigger_reset_topic, "cmnd/%s/reset", machineId);
 
     // The extra parameters to be configured (can be either global or just in the setup)
     // After connecting, parameter.getValue() will get you the configured value
@@ -551,6 +555,17 @@ void do_ota_upgrade(char *text)
     }
 }
 
+void restartBoard()
+{
+    Serial.println("Restarting board...");
+    ESP.restart();
+}
+
+void resetBoard()
+{
+    Serial.println("Resetting board...");
+    ESP.reset();
+}
 
 void mqttCallback(char* topic, byte* payload, unsigned int length)
 {
@@ -568,32 +583,44 @@ void mqttCallback(char* topic, byte* payload, unsigned int length)
         snprintf(global_line1, sizeof(global_line1), "%s", text);
     }
 
-    if (strcmp(topic, line2_topic) == 0)
+    else if (strcmp(topic, line2_topic) == 0)
     {
         snprintf(global_line2, sizeof(global_line2), "%s", text);
     }
 
-    if (strcmp(topic, line3_topic) == 0)
+    else if (strcmp(topic, line3_topic) == 0)
     {
         snprintf(global_line3, sizeof(global_line3), "%s", text);
     }
 
-    if (strcmp(topic, cmnd_temp_coefficient_topic) == 0)
+    else if (strcmp(topic, cmnd_temp_coefficient_topic) == 0)
     {
         temperatureCoef = atof(text);
         save_calibration();
     }
 
-    if (strcmp(topic, cmnd_ds_temp_coefficient_topic) == 0)
+    else if (strcmp(topic, cmnd_ds_temp_coefficient_topic) == 0)
     {
         dsTemperatureCoef = atof(text);
         save_calibration();
     }
 
-    if (strcmp(topic, cmnd_update_topic) == 0)
+    else if (strcmp(topic, cmnd_update_topic) == 0)
     {
         Serial.println("OTA request seen.\n");
         do_ota_upgrade(text);
+    }
+
+    else if (strcmp(topic, cmnd_trigger_restart_topic) == 0)
+    {
+        Serial.println("Restart request seen.");
+        restartBoard();
+    }
+
+    else if (strcmp(topic, cmnd_trigger_reset_topic) == 0)
+    {
+        Serial.println("Reset request seen.");
+        resetBoard();
     }
 
     publishState();
@@ -631,6 +658,8 @@ void mqttReconnect()
             mqttClient.subscribe(cmnd_temp_coefficient_topic);
             mqttClient.subscribe(cmnd_ds_temp_coefficient_topic);
             mqttClient.subscribe(cmnd_update_topic);
+            mqttClient.subscribe(cmnd_trigger_restart_topic);
+            mqttClient.subscribe(cmnd_trigger_reset_topic);
             publishState();
             break;
 
