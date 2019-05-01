@@ -35,7 +35,7 @@
 // For BMP180
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BMP085_U.h>
-
+const char version[] = "1.0.1";
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
 
 Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(10085);
@@ -118,6 +118,7 @@ char cmnd_temp_coefficient_topic[14 + sizeof(machineId)];
 char cmnd_ds_temp_coefficient_topic[20 + sizeof(machineId)];
 char cmnd_trigger_restart_topic[13 + sizeof(machineId)];
 char cmnd_trigger_reset_topic[11 + sizeof(machineId)];
+char cmnd_machineid_topic[15 + sizeof(machineId)];
 
 // The display can fit 26 "i":s on a single line.  It will fit even
 // less of other characters.
@@ -245,15 +246,25 @@ void setup()
                 DynamicJsonBuffer jsonBuffer;
                 JsonObject& json = jsonBuffer.parseObject(buf.get());
                 json.printTo(Serial);
+                Serial.println("");
                 if (json.success())
                 {
-                    Serial.println("\nparsed json");
+                    Serial.println("parsed json");
 
                     strcpy(mqtt_server, json["mqtt_server"]);
                     strcpy(mqtt_port, json["mqtt_port"]);
                     strcpy(workgroup, json["workgroup"]);
                     strcpy(username, json["username"]);
                     strcpy(password, json["password"]);
+                    // if a different ID is configured for mqtt message, use this id as machineId instead
+                    if (json.containsKey("mqttMachineId")) {
+                        const char *s = json.get<const char*>("mqttMachineId");
+                        snprintf(machineId, sizeof(machineId), "%s", s);
+                        Serial.print("Using configured machineId: ");
+                        Serial.println(machineId);
+                    }
+                    drawDisplay("Machine ID", machineId, version);
+                    delay(1000);
 #ifdef HOME_ASSISTANT_DISCOVERY
                     {
                         const char *s = json.get<const char*>("ha_name");
@@ -277,7 +288,17 @@ void setup()
     }
     //end read
 
-    // Set MQTT topics
+    // Serial.println("after load calibration");
+    // uint8_t sc = sensors.getDeviceCount();
+
+    // Serial.print("sensors count: ");
+    // Serial.println(sc);
+    // Serial.println("after load calibration");
+    // sc = sensors.getDeviceCount();
+
+    // Serial.print("sensors count: ");
+    // Serial.println(sc);
+    // // Set MQTT topics
     sprintf(line1_topic, "cmnd/%s/line1", machineId);
     sprintf(line2_topic, "cmnd/%s/line2", machineId);
     sprintf(line3_topic, "cmnd/%s/line3", machineId);
@@ -288,6 +309,7 @@ void setup()
     sprintf(cmnd_update_topic, "cmnd/%s/update", machineId);
     sprintf(cmnd_trigger_restart_topic, "cmnd/%s/restart", machineId);
     sprintf(cmnd_trigger_reset_topic, "cmnd/%s/reset", machineId);
+    sprintf(cmnd_machineid_topic, "cmnd/%s/machineid", machineId);
 
     // The extra parameters to be configured (can be either global or just in the setup)
     // After connecting, parameter.getValue() will get you the configured value
@@ -369,34 +391,13 @@ void setup()
     //save the custom parameters to FS
     if (shouldSaveConfig)
     {
-        Serial.println("saving config");
-        DynamicJsonBuffer jsonBuffer;
-        JsonObject& json = jsonBuffer.createObject();
-        json["mqtt_server"] = mqtt_server;
-        json["mqtt_port"] = mqtt_port;
-        json["workgroup"] = workgroup;
-        json["username"] = username;
-        json["password"] = password;
-#ifdef HOME_ASSISTANT_DISCOVERY
-        json["ha_name"] = ha_name;
-#endif
-
-        File configFile = SPIFFS.open("/config.json", "w");
-        if (!configFile)
-        {
-            Serial.println("failed to open config file for writing");
-        }
-
-        json.printTo(Serial);
-        json.printTo(configFile);
-        configFile.close();
-        //end save
+        saveConfig();
     }
 
     Serial.println("local ip");
     Serial.println(WiFi.localIP());
     drawDisplay("Connected!", "Local IP:", WiFi.localIP().toString().c_str());
-    delay(2000);
+    delay(1000);
 
     // Sensors
     htu.begin();
@@ -438,6 +439,32 @@ void setup()
     Serial.println("");
 
     setupADPS9960();
+}
+
+void saveConfig()
+{
+    Serial.println("saving config");
+    DynamicJsonBuffer jsonBuffer;
+    JsonObject& json = jsonBuffer.createObject();
+    json["mqtt_server"] = mqtt_server;
+    json["mqtt_port"] = mqtt_port;
+    json["workgroup"] = workgroup;
+    json["username"] = username;
+    json["password"] = password;
+#ifdef HOME_ASSISTANT_DISCOVERY
+    json["ha_name"] = ha_name;
+#endif
+    json["mqttMachineId"] = machineId;
+
+    File configFile = SPIFFS.open("/config.json", "w");
+    if (!configFile)
+    {
+        Serial.println("failed to open config file for writing");
+    }
+
+    json.printTo(Serial);
+    json.printTo(configFile);
+    configFile.close();
 }
 
 void setupADPS9960()
@@ -498,6 +525,8 @@ void factoryReset()
 
 void do_ota_upgrade(char *text)
 {
+    drawDisplay("Starting", "OTA", "update");
+    delay(1000);
     DynamicJsonBuffer jsonBuffer;
     JsonObject& json = jsonBuffer.parseObject(text);
     if (!json.success())
@@ -623,7 +652,27 @@ void mqttCallback(char* topic, byte* payload, unsigned int length)
         resetBoard();
     }
 
+
+    else if (strcmp(topic, cmnd_machineid_topic) == 0)
+    {
+        Serial.println("Set machineid request seen.");
+        setMachineId(text);
+    }
     publishState();
+}
+
+void setMachineId(char *newId)
+{
+    Serial.print("Setting Machine ID to ");
+    Serial.println(newId);
+    snprintf(machineId, sizeof(machineId), "%s", newId);
+    Serial.print("New Machine ID is: ");
+    Serial.println(machineId);
+    saveConfig();
+    Serial.println("...saved. Restarting device");
+    // while we could update the id on the fly, restarting will ensure
+    // that the new setup really works, also on next restart
+    restartBoard();
 }
 
 void calculateMachineId()
@@ -660,6 +709,7 @@ void mqttReconnect()
             mqttClient.subscribe(cmnd_update_topic);
             mqttClient.subscribe(cmnd_trigger_restart_topic);
             mqttClient.subscribe(cmnd_trigger_reset_topic);
+            mqttClient.subscribe(cmnd_machineid_topic);
             publishState();
             break;
 
